@@ -1,0 +1,45 @@
+name: "Deploy to Server"
+
+on:
+  push:
+      branches:
+        - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SERVER_IP: ${{ vars.SERVER_IP }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: "Build Docker Image"
+        run: |
+          docker login -u rezzz3 -p $DOCKERHUB_PAT
+          docker build -t rezzz3/mywebsite .
+          docker push rezzz3/mywebsite
+        env:
+          DOCKERHUB_PAT: ${{ secrets.DOCKERHUB_PAT }}
+
+      - name: "Configure SSH"
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+          touch ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      
+      - name: "Put SSH Key in Docker file for Server Access"
+        run: |
+          touch pem.pem
+          echo $SSH_KEY64 | base64 -d > pem.pem && chmod 400 pem.pem
+          ssh-keygen -R $SERVER_IP
+        env: 
+          SSH_KEY64: ${{ secrets.SSH_KEY64 }}
+
+      - name: "Docker Pull and Restart Docker"
+        run: |
+          ssh -t ubuntu@$SERVER_IP -i pem.pem 'docker pull rezzz3/mywebsite'
+          ssh -t ubuntu@$SERVER_IP -i pem.pem 'docker stop mysite && docker rm mysite'
+          ssh -t ubuntu@$SERVER_IP -i pem.pem 'docker run --name mysite -p 80:80 -d rezzz3/mywebsite'
